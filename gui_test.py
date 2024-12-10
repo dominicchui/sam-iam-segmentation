@@ -1,4 +1,5 @@
 import os
+from tkinter import messagebox
 import cv2 
 import numpy as np
 from tkinter import *
@@ -14,34 +15,38 @@ def open_img(predictor):
     points = []
     filename = openfn()
     img = cv2.imread(filename, 1)
-  
+    process_image(predictor, False)
+
+def process_image(predictor, from_video):
+    global img
     # displaying the image 
     cv2.imshow('image', img) 
 
     # Crop the image
-    cv2.setMouseCallback('image', click_event, param = "crop")
+    if from_video:
+        param = ["crop", "video"]
+    else:
+        param = ["crop", "image"]
+    cv2.setMouseCallback('image', click_event, param)
   
     cv2.waitKey(0)
     cv2.destroyAllWindows()
     cropped_image = img
-    # cv2.imshow('cropped_image', cropped_image)
-
-    # original image
-    # original_image = convert_image_cv_to_tk(cropped_image)
 
     img_points = points
-    img = segment_image(predictor, cropped_image, img_points)
+    img = segment_image(predictor, cropped_image, img_points, from_video)
 
     # image with selected points
     image = convert_image_cv_to_tk(img)
     panel = Label(root, image=image)
     panel.image = image
-    panel.grid(row=1, column=0)
+    if from_video:
+        panel.grid(row=1, column=1)
+    else:
+        panel.grid(row=1, column=0)
 
-    # save cropped and segmented image
 
-
-def segment_image(predictor, image, points):
+def segment_image(predictor, image, points, from_video):
     if sam_enabled:
         predictor.set_image(image)
         input_point = np.array(points)
@@ -60,12 +65,12 @@ def segment_image(predictor, image, points):
         mask[0, 50:100, 50:100] = 1
         masks = np.array(mask)
     # print("masks shape: ", masks.shape)
-    return make_mask(masks, image)
+    return make_mask(masks, image, from_video)
 
-def make_mask(masks, image):
+def make_mask(masks, image, from_video):
     # convert mask into image
     mask = masks[0]
-    # print("mask shape: ", mask.shape)
+    print("mask shape: ", mask.shape)
     color = np.array([30, 144, 255, 153])
     h, w = mask.shape[-2:]
     mask = mask.astype(np.uint8)
@@ -76,7 +81,10 @@ def make_mask(masks, image):
 
     # save mask
     output_dir = get_output_dir()
-    cv2.imwrite(os.path.join(output_dir, "input_image_mask.jpeg"), mask*255)
+    if from_video:
+        cv2.imwrite(os.path.join(output_dir, "input_video_frame_0_mask.jpeg"), mask*255)
+    else:
+        cv2.imwrite(os.path.join(output_dir, "input_image_mask.jpeg"), mask*255)
 
     # convert base image to cv2 image
     cv2_img = image
@@ -97,14 +105,14 @@ def make_mask(masks, image):
     # cv2.destroyAllWindows()
     return cv2_merged
 
-def open_vid():
+def open_vid(predictor):
     global img
     global points
     points = []
     filename = openfn()
 
     # convert gif to jpegs first
-    output_dir = os.path.abspath(os.path.join(filename, "../frames"))
+    output_dir = os.path.abspath(os.path.join(get_output_dir(), "original_video_frames"))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     gif_to_jpegs(filename, output_dir)
@@ -112,22 +120,11 @@ def open_vid():
     # display frame 0 
     frame_0_path = os.path.abspath(os.path.join(output_dir, "0.jpeg"))
     img = cv2.imread(frame_0_path, 1) 
-    cv2.imshow('image', img) 
-  
-    # setting mouse handler for the image 
-    # and calling the click_event() function 
-    cv2.setMouseCallback('image', click_event, param = "crop")
-  
-    # wait for enter key to be pressed to exit 
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
-    image = convert_image_cv_to_tk(img)
-    panel = Label(root, image=image)
-    panel.image = image
-    panel.grid(row=1, column=1)
+    process_image(predictor, True)
     vid_points = points
     print(vid_points)
+    button_process_vid["state"] = NORMAL
 
 # convert cv2 image to tk acceptable format
 def convert_image_cv_to_tk(image):
@@ -150,9 +147,10 @@ def gif_to_jpegs(gif_path, output_dir):
 def click_event(event, x, y, flags, params): 
     global img
     global points
+    global crop
     # checking for left mouse clicks 
     if event == cv2.EVENT_LBUTTONDOWN:
-        if params == "crop":
+        if "crop" in params:
             print("cropping")
 
             height, width = img.shape[:2]
@@ -180,6 +178,9 @@ def click_event(event, x, y, flags, params):
                 diff = y2 - height
                 y1 -= diff
                 y2 -= diff
+            # save crop for video cropping
+            if "video" in params:
+                crop = (x1, y1, x2, y2)
 
             # Crop the image
             img = img[y1:y2, x1:x2]
@@ -190,11 +191,14 @@ def click_event(event, x, y, flags, params):
 
             # Save the cropped image
             output_dir = get_output_dir()
-            cv2.imwrite(os.path.join(output_dir, "cropped_input_image.jpeg"), img)
+            if "image" in params:
+                cv2.imwrite(os.path.join(output_dir, "cropped_input_image.jpeg"), img)
+            else:
+                cv2.imwrite(os.path.join(output_dir, "cropped_video_frame_0.jpeg"), img)
 
             cv2.setMouseCallback('image', click_event, param = "segmentation")
 
-        elif params == "segmentation":
+        elif "segmentation" in params:
             print("segmentation")
             points.append([x,y])
             print(f"({x}, {y})")
@@ -204,6 +208,27 @@ def click_event(event, x, y, flags, params):
             cv2.line(img,(x,y-5),(x,y+5),(255,255,255),2)
 
             cv2.imshow('image', img)
+
+def process_video():
+    global crop
+    # crop each frame
+    x1, y1, x2, y2 = crop
+
+    output_dir = os.path.abspath(os.path.join(get_output_dir(), "cropped_video_frames"))
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    original_frames_dir = os.path.abspath(os.path.join(get_output_dir(), "original_video_frames"))
+    for filename in os.listdir(original_frames_dir):
+        filepath = os.path.join(original_frames_dir, filename)
+        image = cv2.imread(filepath)
+
+        # Crop the image
+        cropped_image = image[y1:y2, x1:x2]
+
+        # Save cropped image
+        cv2.imwrite(os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.jpeg"), cropped_image)
+
+    messagebox.showinfo("SAM-IAM", "Video Processed!")
 
 def get_output_dir():
     # Get the absolute path of the script
@@ -222,6 +247,7 @@ def get_output_dir():
 # driver function 
 if __name__=="__main__": 
     sam_enabled = False
+    crop = (0, 0, 0, 0)
     # # set up SAM
     if sam_enabled:
         sam2_checkpoint = "../checkpoints/sam2.1_hiera_large.pt"
@@ -234,14 +260,18 @@ if __name__=="__main__":
         img_predictor = "test"
 
     root = Tk()
+    root.title('SAM-IAM')
     root.geometry("1200x800+200+100")
     root.resizable(width=True, height=True)
 
-    button_img = Button(root, text='Select Image', command= lambda: open_img(img_predictor))
-    button_vid = Button(root, text="Select Video", command=open_vid)
+    button_img = Button(root, text='Select Image', command=lambda: open_img(img_predictor))
+    button_vid = Button(root, text="Select Video", command=lambda: open_vid(img_predictor))
+    button_process_vid = Button(root, text="Process Video", command=process_video)
+    button_process_vid["state"] = DISABLED
 
     button_img.grid(row=0, column=0)
     button_vid.grid(row=0, column=1)
+    button_process_vid.grid(row=2, column=0)
 
     root.mainloop()
 

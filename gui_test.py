@@ -5,6 +5,7 @@ import numpy as np
 from tkinter import *
 from PIL import ImageTk, Image, ImageSequence
 from tkinter import filedialog
+import tomli
 
 def openfn():
     filename = filedialog.askopenfilename(title='open')
@@ -70,7 +71,7 @@ def segment_image(predictor, image, points, from_video):
 def make_mask(masks, image, from_video):
     # convert mask into image
     mask = masks[0]
-    print("mask shape: ", mask.shape)
+    # print("mask shape: ", mask.shape)
     color = np.array([30, 144, 255, 153])
     h, w = mask.shape[-2:]
     mask = mask.astype(np.uint8)
@@ -153,36 +154,11 @@ def click_event(event, x, y, flags, params):
         if "crop" in params:
             print("cropping")
 
-            height, width = img.shape[:2]
-
-            # Determine the smaller dimension to create a square crop
-            crop_size = min(width, height) // 2
-            
-            # Calculate the crop coordinates
-            x1 = x - crop_size
-            x2 = x + crop_size
-            y1 = y - crop_size
-            y2 = y + crop_size
-            # ensure crop is in bounds
-            if x1 < 0:
-                x2 -= x1
-                x1 -= x1
-            if y1 < 0:
-                y2 -= y1
-                y1 -= y1
-            if x2 > width:
-                diff = x2 - width
-                x1 -= diff
-                x2 -= diff
-            if y2 > height:
-                diff = y2 - height
-                y1 -= diff
-                y2 -= diff
+            # Crop the image
+            (x1, y1, x2, y2) = get_crop_coordinates(img, x, y)
             # save crop for video cropping
             if "video" in params:
                 crop = (x1, y1, x2, y2)
-
-            # Crop the image
             img = img[y1:y2, x1:x2]
 
             # Display the cropped image
@@ -208,6 +184,33 @@ def click_event(event, x, y, flags, params):
             cv2.line(img,(x,y-5),(x,y+5),(255,255,255),2)
 
             cv2.imshow('image', img)
+def get_crop_coordinates(img, x, y):
+    height, width = img.shape[:2]
+
+    # Determine the smaller dimension to create a square crop
+    crop_size = min(width, height) // 2
+    
+    # Calculate the crop coordinates
+    x1 = x - crop_size
+    x2 = x + crop_size
+    y1 = y - crop_size
+    y2 = y + crop_size
+    # ensure crop is in bounds
+    if x1 < 0:
+        x2 -= x1
+        x1 -= x1
+    if y1 < 0:
+        y2 -= y1
+        y1 -= y1
+    if x2 > width:
+        diff = x2 - width
+        x1 -= diff
+        x2 -= diff
+    if y2 > height:
+        diff = y2 - height
+        y1 -= diff
+        y2 -= diff
+    return (x1, y1, x2, y2)
 
 def process_video():
     global crop
@@ -217,6 +220,7 @@ def process_video():
     output_dir = os.path.abspath(os.path.join(get_output_dir(), "cropped_video_frames"))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    # todo actually want to crop masks instead
     original_frames_dir = os.path.abspath(os.path.join(get_output_dir(), "original_video_frames"))
     for filename in os.listdir(original_frames_dir):
         filepath = os.path.join(original_frames_dir, filename)
@@ -227,8 +231,8 @@ def process_video():
 
         # Save cropped image
         cv2.imwrite(os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.jpeg"), cropped_image)
-
-    messagebox.showinfo("SAM-IAM", "Video Processed!")
+    if tkinter_enabled:
+        messagebox.showinfo("SAM-IAM", "Video Processed!")
 
 def get_output_dir():
     # Get the absolute path of the script
@@ -243,10 +247,20 @@ def get_output_dir():
         os.makedirs(output_dir)
     return output_dir
 
+def get_config_file_path():
+    # Get the absolute path of the script
+    script_path = os.path.abspath(__file__)
+
+    # Get the directory of the script
+    script_dir = os.path.dirname(script_path)
+    return os.path.join(script_dir, "config.toml")
+
 
 # driver function 
 if __name__=="__main__": 
     sam_enabled = False
+    tkinter_enabled = False
+
     crop = (0, 0, 0, 0)
     # # set up SAM
     if sam_enabled:
@@ -259,19 +273,72 @@ if __name__=="__main__":
     else:
         img_predictor = "test"
 
-    root = Tk()
-    root.title('SAM-IAM')
-    root.geometry("1200x800+200+100")
-    root.resizable(width=True, height=True)
+    if tkinter_enabled:
+        root = Tk()
+        root.title('SAM-IAM')
+        root.geometry("1200x800+200+100")
+        root.resizable(width=True, height=True)
 
-    button_img = Button(root, text='Select Image', command=lambda: open_img(img_predictor))
-    button_vid = Button(root, text="Select Video", command=lambda: open_vid(img_predictor))
-    button_process_vid = Button(root, text="Process Video", command=process_video)
-    button_process_vid["state"] = DISABLED
+        button_img = Button(root, text='Select Image', command=lambda: open_img(img_predictor))
+        button_vid = Button(root, text="Select Video", command=lambda: open_vid(img_predictor))
+        button_process_vid = Button(root, text="Process Video", command=process_video)
+        button_process_vid["state"] = DISABLED
 
-    button_img.grid(row=0, column=0)
-    button_vid.grid(row=0, column=1)
-    button_process_vid.grid(row=2, column=0)
+        button_img.grid(row=0, column=0)
+        button_vid.grid(row=0, column=1)
+        button_process_vid.grid(row=2, column=0)
 
-    root.mainloop()
+        root.mainloop()
+    else:
+        # Process based on config file
 
+        # Read config file
+        file_path = get_config_file_path()
+        if not os.path.exists(file_path):
+            print("config.toml file not found")
+            exit
+        with open(file_path, "rb") as f:
+            data = tomli.load(f)
+
+        # IMAGE
+        if not os.path.exists(data["image"]["input_path"]):
+            print("input image not found")
+            exit
+        image = cv2.imread(data["image"]["input_path"])
+
+        # Crop:
+        # the center point for the square cropping
+        crop_center = data["image"]["crop_center"]
+        (x1, y1, x2, y2) = get_crop_coordinates(image, crop_center[0], crop_center[1])
+        cropped_image = image[y1:y2, x1:x2]
+
+        output_dir = get_output_dir()
+        cv2.imwrite(os.path.join(output_dir, "cropped_input_image.jpeg"), cropped_image)
+
+        # Segment
+        # the points for segmentation
+        seg_points = data["image"]["points"]
+        preview_img = segment_image(img_predictor, cropped_image, seg_points, False)
+
+        # VIDEO
+        if not os.path.exists(data["video"]["input_path"]):
+            print("input video not found")
+            exit
+
+        output_dir = os.path.abspath(os.path.join(get_output_dir(), "original_video_frames"))
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        gif_to_jpegs(data["video"]["input_path"], output_dir)
+
+        # crop and segment frame 0 
+        frame_0_path = os.path.abspath(os.path.join(output_dir, "0.jpeg"))
+        frame_0 = cv2.imread(frame_0_path)
+
+        crop_center = data["video"]["crop_center"]
+        (x1, y1, x2, y2) = get_crop_coordinates(frame_0, crop_center[0], crop_center[1])
+        cropped_frame_0 = frame_0[y1:y2, x1:x2]
+
+        seg_points = data["video"]["points"]
+        preview_img = segment_image(img_predictor, cropped_frame_0, seg_points, True)
+        crop = (x1, y1, x2, y2)
+        process_video()

@@ -1,0 +1,16 @@
+
+[image]
+# the path for the input image
+input_path = "./sample_input/ash_tree.jpg"
+# the point(s) that delineate the object to be segmented
+points = [[100, 100], [200, 200]]
+# the center of the image for the square crop
+crop_center = [240,200]
+
+[video]
+# the path for the input video
+# either is a gif or a directory with jpg frames
+input_path = "./sample_input/dandelion.gif"
+# input_path = "./sample_input/bear"
+points = [[150, 100]]
+crop_center = [100,200]
